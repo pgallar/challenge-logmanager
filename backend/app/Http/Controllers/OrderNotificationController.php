@@ -4,9 +4,6 @@ namespace App\Http\Controllers;
 
 use App\Http\Controllers\Controller;
 use App\Jobs\ProcessOrder;
-use App\Models\Order as ModelsOrder;
-use App\Order;
-use App\Services\MeliService;
 use Illuminate\Http\Request;
 
 class OrderNotificationController extends Controller
@@ -18,12 +15,15 @@ class OrderNotificationController extends Controller
 
         // check if notification is from orders_v2 topic
         if (isset($notification['topic']) && $notification['topic'] === 'orders_v2') {
-            $orderId = $notification['resource']['id'];
+            $orderId = str_replace("/orders/", "", $notification['resource']);
+            $userId = $notification['user_id'];
 
             // dispatch job to process the order
-            ProcessOrder::dispatch($orderId)->onQueue('orders');
+            ProcessOrder::dispatch($userId, $orderId)->onQueue('orders');
+
+            return response()->json(['message' => 'Notification received']);
         }
 
-        return response()->json(['message' => 'Notification received']);
+        return response()->json(['message' => 'No data from notification received']);
     }
 }

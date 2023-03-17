@@ -14,6 +14,7 @@ return new class extends Migration
         Schema::create('orders', function (Blueprint $table) {
             $table->id();
             $table->string('order_id')->unique();
+            $table->string('account_id');
             $table->string('buyer_id');
             $table->string('status');
             $table->decimal('total_amount', 12, 2);

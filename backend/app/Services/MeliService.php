@@ -2,6 +2,7 @@
 
 namespace App\Services;
 
+use App\Models\Account;
 use App\Models\Token;
 use Carbon\Carbon;
 use GuzzleHttp\Client;
@@ -10,93 +11,118 @@ use Illuminate\Support\Facades\Log;
 
 class MeliService
 {
-    protected $clientId;
-    protected $clientSecret;
-    protected $accessToken;
     protected $client;
 
     public function __construct()
     {
-        $this->clientId = env('MELI_CLIENT_ID');
-        $this->clientSecret = env('MELI_CLIENT_SECRET');
-        $this->accessToken = env('MELI_ACCESS_TOKEN');
         $this->client = new Client([
             'base_uri' => 'https://api.mercadolibre.com/',
         ]);
     }
 
-    public function saveToken($access_token, $refresh_token, $expires_in)
+    public function saveToken($accountId, $access_token, $refresh_token, $expires_in)
     {
-        $token = new Token([
-            'access_token' => $access_token,
-            'refresh_token' => $refresh_token,
-            'expires_in' => $expires_in,
-            'expires_at' => Carbon::now()->addSeconds($expires_in),
-        ]);
+        $token = Token::where('account_id', $accountId)->firstOrNew();
+        $token->account_id = $accountId;
+        $token->access_token = $access_token;
+        $token->refresh_token = $refresh_token;
+        $token->expires_in = $expires_in;
+        $token->expires_at = Carbon::now()->addSeconds($expires_in)->toDateTimeString();
 
         $token->save();
+
+        return $token;
     }
 
-    public function getToken()
+    public function getToken($accountId)
     {
-        $token = Token::orderBy('created_at', 'desc')->first();
+        $token = Token::where('account_id', $accountId)->first();
+        $account = Account::findOrFail($accountId)->first();
 
-        if ($token->expires_at->isPast()) {
-            $refresh_token = $token->refresh_token;
-            $grant_type = 'refresh_token';
+        if (isset($token)) {
+            if ($token->isExpired()) {
+                $refresh_token = $token->refresh_token;
+                $grant_type = 'refresh_token';
 
+                $response = $this->client->request('POST', '/oauth/token', [
+                    'form_params' => [
+                        'grant_type' => $grant_type,
+                        'client_id' => $account->client_id,
+                        'client_secret' => $account->client_secret,
+                        'refresh_token' => $refresh_token,
+                    ]
+                ]);
+            }
+        } else {
             $response = $this->client->request('POST', '/oauth/token', [
                 'form_params' => [
-                    'grant_type' => $grant_type,
-                    'client_id' => $this->clientId,
-                    'client_secret' => $this->clientSecret,
-                    'refresh_token' => $refresh_token,
+                    'grant_type' => 'authorization_code',
+                    'client_id' => $account->client_id,
+                    'client_secret' => $account->client_secret,
+                    'response_type' => 'code',
+                    'code' => $account->code,
+                    'redirect_uri' => "http://localhost:8000/accounts/callback/$account->short_name"
                 ]
             ]);
+        }
 
+        if (isset($response)) {
             $body = json_decode((string) $response->getBody(), true);
 
-            $this->saveToken($body['access_token'], $body['refresh_token'], $body['expires_in']);
-
-            $token = Token::orderBy('created_at', 'desc')->first();
+            $token = $this->saveToken($accountId, $body['access_token'], $body['refresh_token'], $body['expires_in']);
         }
 
         return $token->access_token;
     }
 
-    public function getOrder($orderId)
+    public function getOrder($accountId, $orderId)
     {
         try {
+            $token = $this->getToken($accountId);
             $response = $this->client->request('GET', "orders/{$orderId}", [
                 'headers' => [
-                    'Authorization' => "Bearer {$this->getToken()}",
+                    'Authorization' => "Bearer {$token}",
                 ],
             ]);
 
-            $order = json_decode($response->getBody()->getContents(), true);
-
-            return $order;
+            return json_decode($response->getBody()->getContents(), true);
         } catch (RequestException $e) {
             Log::error($e->getMessage());
             return null;
         }
     }
 
-    public function getOrderItems($orderId)
+    public function getUser($accountId)
     {
         try {
-            $response = $this->client->request('GET', "orders/{$orderId}/items", [
+            $token = $this->getToken($accountId);
+            $response = $this->client->request('GET', "users/me", [
                 'headers' => [
-                    'Authorization' => "Bearer {$this->getToken()}",
+                    'Authorization' => "Bearer {$token}",
                 ],
             ]);
 
-            $items = json_decode($response->getBody()->getContents(), true);
-
-            return $items;
+            return json_decode($response->getBody()->getContents(), true);
         } catch (RequestException $e) {
             Log::error($e->getMessage());
             return null;
         }
+    }
+
+    public function activate($shortName, $code)
+    {
+        $account = Account::where('short_name', $shortName)->firstOrFail();
+        $account->code = $code;
+        $account->save();
+
+        $userData = $this->getUser($account->id);
+
+        if (!isset($userData)) {
+            throw new \Exception("Error on get token");
+        }
+
+        $account->activated = true;
+        $account->user_id = $userData['id'];
+        $account->save();
     }
 }

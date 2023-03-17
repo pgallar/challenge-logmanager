@@ -13,6 +13,7 @@ class CreateTokensTable extends Migration
             $table->string('access_token');
             $table->string('refresh_token');
             $table->string('expires_in');
+            $table->dateTime('expires_at');
             $table->timestamps();
         });
     }

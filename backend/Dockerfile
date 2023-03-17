@@ -8,7 +8,8 @@ RUN apt-get update && apt-get install -y \
     libmcrypt-dev \
     libzip-dev \
     zip \
-    unzip
+    unzip \
+    python-dev
 
 RUN docker-php-ext-install pdo_mysql zip sockets
 
@@ -18,5 +19,9 @@ COPY . /app
 
 RUN composer install
 
+RUN apt-get install -y supervisor
+
+COPY .docker/supervisor/laravel.conf /etc/supervisor/conf.d
+
 EXPOSE 8000
-CMD ["php-fpm"]
+CMD ["/app/.docker/start.sh"]

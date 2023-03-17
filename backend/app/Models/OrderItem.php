@@ -16,9 +16,6 @@ class OrderItem extends Model
         'quantity',
         'unit_price',
         'currency_id',
-        'full_unit_price',
-        'variation_id',
-        'variation_color',
-        'variation_size',
+        'full_unit_price'
     ];
 }
